@@ -4,6 +4,7 @@ The struggle to help my mom remember simple tasks is hard, sometimes, she rememb
 My solution? Create a helping hands buddy for her that is both helpful, interactive and fun for her to use.
 # Program
 This program is written in C++ for particle IDE using the Photon2 microcontroller. 
+This program realise on a SQL database that pushes scheduled information to the device using the cloud. 
 # The Device Features
 3d printed SolidWorks designed case
 2.4" TFT FeatherWing V2 Adafruit display
