@@ -14,3 +14,5 @@ Mp3 player
 speaker
 lithium battery (chordless power)
 rechargeable
+# Device abilities
+Can operate devices connected to WeMo plugs, display time and date, schedule, neopixels light up with indications, software timers are used to display reminders throughout the day. 
