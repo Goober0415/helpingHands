@@ -21,20 +21,45 @@
 
 // Global variables
 char buffer[32];
-int i;
-static unsigned long currentTime = millis();
-static unsigned long lastUpdateTime = 0;
+int i, currentMinute = Time.minute(), currentHour = Time.hour();
+unsigned long currentTime = Particle.syncTime();
+static unsigned long lastUpdateTime = currentTime;
 
 // constants
 const int PIXELCOUNT = 7;
-const int DELAY = 5000;
+const int TIMER_INTERVAL = 60000; // 60 seconds
 
 // objects
 Adafruit_ILI9341 tft(TFT_CS, TFT_DC);
 Adafruit_NeoPixel pixel(PIXELCOUNT, SPI1, WS2812B);
 
+struct TimerEvent
+{
+  String taskName;
+  int intervalMinutes;
+};
+
+struct TimeOfDayEvent
+{
+  String taskName;
+  int hour;
+  int minute;
+};
+
+TimerEvent timerEvents[] = {
+    {"Time to pee", 5},
+    {"Are your fee up?", 11},
+    {"Lets get up and move around", 14}};
+
+TimeOfDayEvent timeOfDayEvents[] = {
+    {"Breakfast time eat some oatmeal", 8, 30},
+    {"we should do some dishes", 10, 00},
+    {"Lets eat some lunch!", 13, 00},
+    {"Time to wind down", 18, 00}};
+
 // functions
-unsigned long testText();
+unsigned long
+testText();
 unsigned long testFillScreen();
 unsigned long testFilledRects(uint16_t color1, uint16_t color2);
 unsigned long testRects(uint16_t color);
@@ -50,12 +75,23 @@ void updateTimeAndDate();
 void updateDisplay(const char *text);
 void printRemindToPee();
 void printRemindFeetUp();
+void printRemindMoveAround();
+void updatePixelState(uint32_t color);
+void checkTimerEvents();
+void checkTimeOfDayEvents();
+void printMorningBreakfast();
+void printLunchBreakReminder();
+void printDishes();
+void printEveningWindDown();
+void executeTask(String taskName);
 
-// Timers
-// Timer pottyTimer(3600000, printRemindToPee); //per hour
-Timer pottyTimer(60000, printRemindToPee); // per minute
-// Timer feetUpTimer(2700000, printRemindFeetUp); //every 45 minutes
-Timer feetUpTimer(45000, printRemindFeetUp); // per 45 seconds
+// // Timers
+// // Timer pottyTimer(3600000, printRemindToPee); //per hour
+// Timer pottyTimer(360000, printRemindToPee); // per minute (demo time)
+// // Timer feetUpTimer(2700000, printRemindFeetUp); //every 45 minutes
+// Timer feetUpTimer(45000, printRemindFeetUp); // per 45000 ms (demo time)
+// //Timer moveTimer(10800000, printRemindMoveAround);//everyTwoHours
+// Timer moveTimer(1800000, printRemindMoveAround);// per 18000 ms (demo time)
 
 SYSTEM_MODE(AUTOMATIC);
 
@@ -63,16 +99,17 @@ void setup()
 {
   Serial.begin(9600);
   delay(5000);
-  Serial.println("FeatherWing TFT Test!");
 
   tft.begin();
   WiFi.on();
   waitFor(WiFi.ready, 10000);
   Particle.syncTime();
   Time.zone(-7);
+  updateTimeAndDate();
   pixel.begin();
   pixel.clear();
   pixel.setBrightness(15);
+
   pixel.setPixelColor(0, violet);
   pixel.setPixelColor(1, indigo);
   pixel.setPixelColor(2, blue);
@@ -82,6 +119,7 @@ void setup()
   pixel.setPixelColor(6, red);
 
   pixel.show();
+
   // Serial.println(F("Done!"));
 
   // read diagnostics (optional but can help debug problems)
@@ -132,12 +170,15 @@ void setup()
 
   tft.setRotation(1); // Adjust rotation as needed
   pixel.clear();
-  pottyTimer.start();
-  feetUpTimer.start();
+  // pottyTimer.start();
+  // feetUpTimer.start();
+  // moveTimer.start();
 }
 
 void loop()
 {
+  currentTime = Particle.syncTime();
+
   pixel.clear();
   pixel.setBrightness(15);
   pixel.setPixelColor(0, blue);
@@ -147,47 +188,41 @@ void loop()
   pixel.setPixelColor(4, blue);
   pixel.setPixelColor(5, violet);
   pixel.setPixelColor(6, blue);
-
   pixel.show();
+  pixel.clear();
 
-  if (millis() - lastUpdateTime >= 1000)
-  { // Update every second
-    lastUpdateTime = millis();
+  if (currentTime - lastUpdateTime >= 60000)
+  {
+    lastUpdateTime = currentTime;
     updateTimeAndDate();
     updateDisplay(buffer);
   }
 
-  if (millis() - lastUpdateTime >= 1200000)
-  {
-    printRemindToPee();
-    pottyTimer.reset();
-  }
-  if (millis() - lastUpdateTime >= 45000)
-  {
-    printRemindFeetUp();
-    feetUpTimer.reset();
-  }
+  executeTask("Remind to pee");
+  delay(2000);
+  executeTask("Feet up reminder");
+  delay(2000);
+  executeTask("Move around reminder");
+  delay(2000);
+  executeTask("Breakfast time eat some oatmeal");
+  delay(2000);
+  executeTask("Lunch break reminder");
+  delay(2000);
+  executeTask("Evening wind-down");
+  delay(2000);
+  executeTask("dishes");
+  delay(2000);
 }
 
 void updateTimeAndDate()
 {
   bool synced = Particle.syncTime();
-  // Ensure Particle is synchronized with cloud time
   if (!synced)
   {
     Serial.println("Not synced with Particle Cloud. Attempting sync...");
     Particle.syncTime();
     delay(5000); // Wait for sync to complete
   }
-
-  // Get current time
-  snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d\n", Time.hour(), Time.minute(), Time.second());
-
-  // Get current date
-  snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), " %02d-%02d-%04d", Time.month(), Time.day(), Time.year());
-
-  Serial.print("Current Time: ");
-  Serial.println(buffer);
 }
 
 void updateDisplay(const char *text)
@@ -494,70 +529,172 @@ unsigned long testFilledRoundRects()
 
 void printRemindToPee()
 {
-  static unsigned long lastBlinkTime = 0;
-  static const unsigned long BLINK_DELAY = 60000; // 1 minute between blinks
+  updatePixelState(yellow);
 
   tft.fillScreen(ILI9341_BLACK);
-  tft.setCursor(45, 20);
-  tft.setTextColor(ILI9341_CYAN);
+  tft.setCursor(0, 0);
+  tft.setTextColor(ILI9341_YELLOW);
   tft.setTextSize(3);
   tft.println("Time to try to use the restroom!");
-
-  pixel.clear();
-  pixel.setBrightness(15);
-  pixel.setPixelColor(0, yellow);
-  pixel.setPixelColor(1, yellow);
-  pixel.setPixelColor(2, yellow);
-  pixel.setPixelColor(3, yellow);
-  pixel.setPixelColor(4, yellow);
-  pixel.setPixelColor(5, yellow);
-  pixel.setPixelColor(6, yellow);
-
-  pixel.show();
-
-  if (currentTime - lastBlinkTime >= BLINK_DELAY)
-  {
-    lastBlinkTime = currentTime;
-
-    // Toggle the state of the pixels
-    for (int i = 0; i < 7; i++)
-    {
-      pixel.setPixelColor(i, pixel.getPixelColor(i) == yellow ? LOW : yellow);
-    }
-  }
 }
 
 void printRemindFeetUp()
 {
-  static unsigned long lastBlinkTime = 0;
-  static const unsigned long BLINK_DELAY = 4500; // 2 MINUTES between blinks
+  updatePixelState(orange);
 
   tft.fillScreen(ILI9341_BLACK);
-  tft.setCursor(24, 20);
-  tft.setTextColor(ILI9341_GREEN);
+  tft.setCursor(0, 0);
+  tft.setTextColor(ILI9341_ORANGE);
   tft.setTextSize(3);
   tft.println("Are your feet up?!");
+}
 
-  pixel.clear();
-  pixel.setBrightness(15);
-  pixel.setPixelColor(0, orange);
-  pixel.setPixelColor(1, orange);
-  pixel.setPixelColor(2, orange);
-  pixel.setPixelColor(3, orange);
-  pixel.setPixelColor(4, orange);
-  pixel.setPixelColor(5, orange);
-  pixel.setPixelColor(6, orange);
+void printRemindMoveAround()
+{
+  updatePixelState(green);
 
-  pixel.show();
+  tft.fillScreen(ILI9341_BLACK);
+  tft.setCursor(0, 0);
+  tft.setTextColor(ILI9341_GREEN);
+  tft.setTextSize(3);
+  tft.println("Lets get up and move around a little");
+}
 
-  if (currentTime - lastBlinkTime >= BLINK_DELAY)
+void printMorningBreakfast()
+{
+  updatePixelState(violet);
+
+  tft.fillScreen(ILI9341_WHITE);
+  tft.setCursor(0, 0);
+  tft.setTextColor(ILI9341_PURPLE);
+  tft.setTextSize(3);
+  tft.println("mmm yummy oatmeal");
+}
+
+void printLunchBreakReminder()
+{
+  updatePixelState(blue);
+
+  tft.fillScreen(ILI9341_WHITE);
+  tft.setCursor(0, 0);
+  tft.setTextColor(ILI9341_NAVY);
+  tft.setTextSize(3);
+  tft.println("Time to eat some lunch!");
+}
+
+void printEveningWindDown()
+{
+  updatePixelState(indigo);
+
+  tft.fillScreen(ILI9341_WHITE);
+  tft.setCursor(0, 0);
+  tft.setTextColor(ILI9341_BLUE);
+  tft.setTextSize(3);
+  tft.println("Time to relax, take a shower and wind down");
+}
+
+void printDishes()
+{
+  updatePixelState(orange);
+
+  tft.fillScreen(ILI9341_BLACK);
+  tft.setCursor(0, 0);
+  tft.setTextColor(ILI9341_ORANGE);
+  tft.setTextSize(3);
+  tft.println("Lets load the dishwasher, remember to keep cups together with their lids");
+}
+void checkTimerEvents()
+{
+  int numTimerEvents = 3;
+  TimerEvent event = timerEvents[i];
+  for (i = 0; i < numTimerEvents; i++)
   {
-    lastBlinkTime = currentTime;
-
-    // Toggle the state of the pixels
-    for (int i = 0; i < 7; i++)
+    if ((currentMinute % event.intervalMinutes == 0))
     {
-      pixel.setPixelColor(i, pixel.getPixelColor(i) == yellow ? LOW : yellow);
+      executeTask(event.taskName);
     }
+  }
+}
+
+void checkTimeOfDayEvents()
+{
+  int numTimeOfDayEvents = 4;
+
+  for (i = 0; i < numTimeOfDayEvents; i++)
+  {
+    TimeOfDayEvent event = timeOfDayEvents[i];
+
+    if ((currentHour == event.hour) && (event.minute == currentMinute))
+    {
+      executeTask(event.taskName);
+    }
+  }
+}
+
+void updatePixelState(uint32_t color)
+{
+  static uint32_t lastUpdateTime = millis();
+
+  unsigned long currentTime = millis();
+  if (currentTime - lastUpdateTime <= 30000)
+  {
+    lastUpdateTime = currentTime;
+
+    // Clear all pixels
+    uint32_t clearColor = ~(0xFFFFFFFF << (PIXELCOUNT * 8));
+    pixel.setPixelColor(0, color);
+    pixel.setPixelColor(1, color);
+    pixel.setPixelColor(2, color);
+    pixel.setPixelColor(3, color);
+    pixel.setPixelColor(4, color);
+    pixel.setPixelColor(5, color);
+    pixel.setPixelColor(6, color);
+
+    // Use bitwise operations to set multiple colors at once
+    uint32_t mask = 0xFF << (6 * 8);
+    uint32_t shift = 24 - (PIXELCOUNT * 8);
+    uint32_t colorValue = ((uint32_t)color << shift) & mask;
+    pixel.setPixelColor(PIXELCOUNT, colorValue);
+
+    pixel.show();
+  }
+}
+
+void executeTask(String taskName)
+{
+  tft.fillScreen(ILI9341_BLACK);
+
+  if (taskName == "Remind to pee")
+  {
+    printRemindToPee();
+  }
+  else if (taskName == "Feet up reminder")
+  {
+    printRemindFeetUp();
+  }
+  else if (taskName == "Move around reminder")
+  {
+    printRemindMoveAround();
+  }
+  else if (taskName == "Breakfast time eat some oatmeal")
+  {
+    printMorningBreakfast();
+  }
+  else if (taskName == "Lunch break reminder")
+  {
+    printLunchBreakReminder();
+  }
+  else if (taskName == "Evening wind-down")
+  {
+    printEveningWindDown();
+  }
+  else if (taskName == "dishes")
+  {
+    printDishes();
+  }
+  else
+  {
+    // Handle unknown tasks
+    tft.println("Unknown task");
   }
 }
