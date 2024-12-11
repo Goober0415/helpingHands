@@ -15,7 +15,7 @@
 #define TFT_WIDTH 320
 #define TFT_HEIGHT 240
 
-SYSTEM_MODE(AUTOMATIC);
+SYSTEM_MODE(MANUAL);
 
 // VARIABLES
 // GLOBAL
@@ -28,18 +28,17 @@ bool buttonState, alarmOnOff, MP3OnOff;
 unsigned long lastRemindToPeeTime = 0;
 unsigned long lastRemindFeetUpTime = 0;
 unsigned long lastRemindMoveAroundTime = 0;
-
+unsigned long lastCheckTime = 0;
+unsigned long lastRemindUpdate = 0;
 // CONSTANTS
-const int PIXELCOUNT = 7, NUMBEROFTRACKS = 6, WEMO1 = 1;
-
+const int PIXELCOUNT = 7, NUMBEROFTRACKS = 6, WEMO = 1;
+const unsigned long DEBOUNCE_DELAY = 1000; // 1 second debounce time
 // OBJECTS
 Adafruit_ILI9341 tft(TFT_CS, TFT_DC);
 Adafruit_NeoPixel pixel(PIXELCOUNT, SPI1, WS2812B);
 // Button redButton(EN_PIN);
-Button blueButton(A1);
-Button yellowButton(A2);
-Button greenButton(A5);
-DFRobotDFPlayerMini MomsGrooves;
+Button encoderSwitch(D15);
+//DFRobotDFPlayerMini MomsGrooves;
 
 // FUNCTIONS
 // DISPLAY FUNCTIONS
@@ -83,23 +82,28 @@ const char *reminders[] = {
     "Bedtime"};
 
 // Time variables
-unsigned long remindToPeeInterval = 3600000UL;        // Every hour in milliseconds
-unsigned long remindFeetUpInterval = 27000000UL;      // Every 45 minutes in milliseconds
-unsigned long remindMoveAroundInterval = 108000000UL; // Every 3 hours and 15 minutes in milliseconds
+unsigned long remindToPeeInterval = 3600000;        // Every hour in milliseconds
+unsigned long remindFeetUpInterval = 27000000;      // Every 45 minutes in milliseconds
+unsigned long remindMoveAroundInterval = 108000000; // Every 3 hours and 15 minutes in milliseconds
+Timer timeToPee(remindToPeeInterval, printRemindToPee);
+Timer feetUp(remindFeetUpInterval, printRemindFeetUp);
+Timer moveIt(remindMoveAroundInterval, printRemindMoveAround);
 
 // Scheduled reminders
 unsigned long morningBreakfastTime = 28800000UL;   // 0830 in milliseconds since midnight
 unsigned long lunchBreakReminderTime = 46800000UL; // 1300 in milliseconds since midnight
 unsigned long dishesTime = 36000000UL;             // 1000 in milliseconds since midnight
 unsigned long eveningWindDownTime = 64800000UL;    // 2200 in milliseconds since midnight
-
-void setupScheduleDisplay();
+Timer breakfast(morningBreakfastTime, printMorningBreakfast);
+Timer lunch(lunchBreakReminderTime, printLunchBreakReminder);
+Timer dishes(dishesTime, printDishes);
+Timer windDown(eveningWindDownTime, printEveningWindDown);
 
 // MAIN
 void setup()
 {
   Serial.begin(115200);
-
+  Wire.begin();
   // initiate display
   tft.begin();
   // initialte wifi
@@ -191,7 +195,7 @@ void setup()
   delay(500);
 
   updateTimeAndDate();
-  setupScheduleDisplay();
+
 
   // initiate MP3 player
   // MomsGrooves.begin(Serial1);
@@ -208,56 +212,27 @@ void setup()
 
 void loop()
 {
-  // if (redButton.isClicked()) {
-  //   SystemSleepConfiguration Config;
-  //   config.mode(SystemsSleepMode::STOP)
-  //       .gpio(redButton, RISING);
-
-  //   System.sleep(config);
-  // }
-  // Update pixel state every second
-  updatePixelState(tomato);
-
-  // Update time every 30 seconds
-  if (millis() - lastUpdateTime >= 30000)
-  {
-    updateTimeAndDate();
-    lastUpdateTime = millis();
-  }
-  if (currentTime % remindToPeeInterval == 0 && currentTime != lastRemindToPeeTime)
-  {
-    printRemindToPee();
-    lastRemindToPeeTime = currentTime;
+// Update pixel state every second
+ updatePixelState(tomato);
+ currentTime = millis();
+ // Update time every 30 seconds
+ if (millis() - lastUpdateTime >= 30000)
+ {
+   updateTimeAndDate();
+   lastUpdateTime = millis();
   }
 
-  if (currentTime % remindFeetUpInterval == 0 && currentTime != lastRemindFeetUpTime)
+  if (encoderSwitch.isClicked())
   {
-    printRemindFeetUp();
-    lastRemindFeetUpTime = currentTime;
+    buttonState = !buttonState;
   }
-
-  if (currentTime % remindMoveAroundInterval == 0 && currentTime != lastRemindMoveAroundTime)
+  if (buttonState == TRUE)
   {
-    printRemindMoveAround();
-    lastRemindMoveAroundTime = currentTime;
+    wemoWrite(WEMO, LOW);
   }
-
-  // Check for scheduled reminders
-  if (currentTime >= morningBreakfastTime && currentTime < lunchBreakReminderTime)
+  else
   {
-    printMorningBreakfast();
-  }
-  else if (currentTime >= lunchBreakReminderTime && currentTime < dishesTime)
-  {
-    printLunchBreakReminder();
-  }
-  else if (currentTime >= dishesTime && currentTime < eveningWindDownTime)
-  {
-    printDishes();
-  }
-  else if (currentTime >= eveningWindDownTime)
-  {
-    printEveningWindDown();
+    wemoWrite(WEMO, HIGH);
   }
 }
 
@@ -595,33 +570,7 @@ void updateTimeAndDate()
 //           tft.println("Device sleepin\n");
 //         }
 // }
-// SCHEDULE
-void setupScheduleDisplay()
-{
-  tft.fillScreen(ILI9341_BLACK);
 
-  int x = 20;
-  int y = 40;
-  int fontSize = 24;
-
-  tft.setCursor(x, y);
-  tft.setTextColor(ILI9341_RED);
-  tft.setTextSize(fontSize);
-  tft.println("Daily Schedule");
-  y += fontSize * 1.5;
-
-  for (int i = 0; i < sizeof(reminders) / sizeof(reminders[0]); i++)
-  {
-    tft.println(reminders[i]);
-    y += fontSize * 1.5;
-
-    if (i < sizeof(reminders) / sizeof(reminders[0]) - 1)
-    {
-      tft.println("---");
-      y += fontSize;
-    }
-  }
-}
 // REMINDERS FUNCTIONS
 void printRemindToPee()
 {
