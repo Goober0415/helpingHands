@@ -38,7 +38,7 @@ Adafruit_ILI9341 tft(TFT_CS, TFT_DC);
 Adafruit_NeoPixel pixel(PIXELCOUNT, SPI1, WS2812B);
 // Button redButton(EN_PIN);
 Button encoderSwitch(D15);
-//DFRobotDFPlayerMini MomsGrooves;
+// DFRobotDFPlayerMini MomsGrooves;
 
 // FUNCTIONS
 // DISPLAY FUNCTIONS
@@ -196,7 +196,6 @@ void setup()
 
   updateTimeAndDate();
 
-
   // initiate MP3 player
   // MomsGrooves.begin(Serial1);
   // MP3OnOff = MomsGrooves.begin(Serial1);
@@ -212,14 +211,22 @@ void setup()
 
 void loop()
 {
-// Update pixel state every second
- updatePixelState(tomato);
- currentTime = millis();
- // Update time every 30 seconds
- if (millis() - lastUpdateTime >= 30000)
- {
-   updateTimeAndDate();
-   lastUpdateTime = millis();
+  // Update pixel state every second
+  updatePixelState(tomato);
+  currentTime = millis();
+  timeToPee.start();
+  feetUp.start();
+  moveIt.start();
+  breakfast.start();
+  lunch.start();
+  dishes.start();
+  windDown.start();
+
+  // Update time every 30 seconds
+  if (millis() - lastUpdateTime >= 30000)
+  {
+    updateTimeAndDate();
+    lastUpdateTime = millis();
   }
 
   if (encoderSwitch.isClicked())
@@ -234,6 +241,9 @@ void loop()
   {
     wemoWrite(WEMO, HIGH);
   }
+  timeToPee.reset();
+  feetUp.reset();
+  moveIt.reset();
 }
 
 // FUNCTION DEFINITIONS
