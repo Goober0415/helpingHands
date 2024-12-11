@@ -12,24 +12,30 @@
 #define TFT_DC D5
 #define TFT_CS D4
 #define STMPE_CS D3
+#define TFT_WIDTH 320
+#define TFT_HEIGHT 240
 
 SYSTEM_MODE(AUTOMATIC);
 
 // VARIABLES
 // GLOBAL
 char buffer[32];
+char timeString[9];
 int i;
 unsigned long currentTime = Particle.syncTime();
-static unsigned long lastUpdateTime = currentTime;
+static unsigned long lastUpdateTime = 0;
 bool buttonState, alarmOnOff, MP3OnOff;
+unsigned long lastRemindToPeeTime = 0;
+unsigned long lastRemindFeetUpTime = 0;
+unsigned long lastRemindMoveAroundTime = 0;
 
 // CONSTANTS
-const int PIXELCOUNT = 7, EN_PIN = D0, NUMBEROFTRACKS = 6, WEMO1 = 1;
+const int PIXELCOUNT = 7, NUMBEROFTRACKS = 6, WEMO1 = 1;
 
 // OBJECTS
 Adafruit_ILI9341 tft(TFT_CS, TFT_DC);
 Adafruit_NeoPixel pixel(PIXELCOUNT, SPI1, WS2812B);
-Button redButton(EN_PIN);
+// Button redButton(EN_PIN);
 Button blueButton(A1);
 Button yellowButton(A2);
 Button greenButton(A5);
@@ -49,19 +55,14 @@ unsigned long testTriangles();
 unsigned long testFilledCircles(uint8_t radius, uint16_t color);
 unsigned long testCircles(uint8_t radius, uint16_t color);
 unsigned long testFilledRoundRects();
-
 // NEOPIXEL FUNCTIONS
 void updatePixelState(uint32_t color);
-
 // TIME FUNCTIONS
 void updateTimeAndDate();
 // void checkTimerEvents();
 // void checkTimeOfDayEvents();
-
 // UPDATE FUNCTIONS
-void updateDisplay();
-void togglePowerState();
-
+// void togglePowerState();
 // REMINDERS FUNCTIONS
 void printRemindToPee();
 void printRemindFeetUp();
@@ -71,20 +72,58 @@ void printLunchBreakReminder();
 void printDishes();
 void printEveningWindDown();
 
+// SCHEDULE
+const char *reminders[] = {
+    "Wake Up",
+    "Breakfast",
+    "Take Medication",
+    "Lunch",
+    "Exercise",
+    "Dinner",
+    "Bedtime"};
+
+// Time variables
+unsigned long remindToPeeInterval = 3600000UL;        // Every hour in milliseconds
+unsigned long remindFeetUpInterval = 27000000UL;      // Every 45 minutes in milliseconds
+unsigned long remindMoveAroundInterval = 108000000UL; // Every 3 hours and 15 minutes in milliseconds
+
+// Scheduled reminders
+unsigned long morningBreakfastTime = 28800000UL;   // 0830 in milliseconds since midnight
+unsigned long lunchBreakReminderTime = 46800000UL; // 1300 in milliseconds since midnight
+unsigned long dishesTime = 36000000UL;             // 1000 in milliseconds since midnight
+unsigned long eveningWindDownTime = 64800000UL;    // 2200 in milliseconds since midnight
+
+void setupScheduleDisplay();
+
+// MAIN
 void setup()
 {
-  Serial.begin(9600);
-  delay(5000);
+  Serial.begin(115200);
+
   // initiate display
   tft.begin();
   // initialte wifi
   WiFi.on();
-  // WiFi.clearCredentials();
-  // WiFi.setCredentials("CJLT2023","Charlie915");
+  //  WiFi.clearCredentials();
+  //  WiFi.setCredentials("CJLT2023","Charlie915");
   waitFor(WiFi.ready, 1000);
   // initiate time and date
   Particle.syncTime();
   Time.zone(-7);
+  // attachInterrupt(redButton, buttonState, RISING);
+  // initiate neopixels
+  pixel.begin();
+  pixel.setBrightness(15);
+  pixel.setPixelColor(0, violet);
+  pixel.setPixelColor(1, indigo);
+  pixel.setPixelColor(2, blue);
+  pixel.setPixelColor(3, green);
+  pixel.setPixelColor(4, yellow);
+  pixel.setPixelColor(5, orange);
+  pixel.setPixelColor(6, red);
+  pixel.show();
+  delay(5000);
+  pixel.clear();
   // read diagnostics (optional but can help debug problems)
   uint8_t x = tft.readcommand8(ILI9341_RDMODE);
   Serial.print("Display Power Mode: 0x");
@@ -151,44 +190,78 @@ void setup()
   Serial.println(testFilledRoundRects());
   delay(500);
 
-  Serial.println(F("Done!"));
-  tft.setRotation(1);
   updateTimeAndDate();
-
-  // initiate neopixels
-  pixel.begin();
-  pixel.setBrightness(15);
-  pixel.setPixelColor(0, violet);
-  pixel.setPixelColor(1, indigo);
-  pixel.setPixelColor(2, blue);
-  pixel.setPixelColor(3, green);
-  pixel.setPixelColor(4, yellow);
-  pixel.setPixelColor(5, orange);
-  pixel.setPixelColor(6, red);
-  pixel.show();
-  delay(5000);
-  pixel.clear();
+  setupScheduleDisplay();
 
   // initiate MP3 player
-  MomsGrooves.begin(Serial1);
-  MP3OnOff = MomsGrooves.begin(Serial1);
-  if (!MP3OnOff)
-  {
-    Serial.printf("Unable to begin:\n");
-    Serial.printf("1. Please recheck the connection\n");
-    Serial.printf("2. Please insert the SD card!\n");
-    while (true)
-      ;
-  }
-  Serial.printf("DFPlayer Mini Online\n");
-  MomsGrooves.volume(25);
+  // MomsGrooves.begin(Serial1);
+  // MP3OnOff = MomsGrooves.begin(Serial1);
+  // while (!MP3OnOff)
+  // {
+  //   Serial.printf("Unable to begin:\n");
+  //   Serial.printf("1. Please recheck the connection\n");
+  //   Serial.printf("2. Please insert the SD card!\n");
+  // }
+  // Serial.printf("DFPlayer Mini Online\n");
+  // MomsGrooves.volume(25);
 }
 
 void loop()
 {
+  // if (redButton.isClicked()) {
+  //   SystemSleepConfiguration Config;
+  //   config.mode(SystemsSleepMode::STOP)
+  //       .gpio(redButton, RISING);
+
+  //   System.sleep(config);
+  // }
+  // Update pixel state every second
+  updatePixelState(tomato);
+
+  // Update time every 30 seconds
+  if (millis() - lastUpdateTime >= 30000)
+  {
+    updateTimeAndDate();
+    lastUpdateTime = millis();
+  }
+  if (currentTime % remindToPeeInterval == 0 && currentTime != lastRemindToPeeTime)
+  {
+    printRemindToPee();
+    lastRemindToPeeTime = currentTime;
+  }
+
+  if (currentTime % remindFeetUpInterval == 0 && currentTime != lastRemindFeetUpTime)
+  {
+    printRemindFeetUp();
+    lastRemindFeetUpTime = currentTime;
+  }
+
+  if (currentTime % remindMoveAroundInterval == 0 && currentTime != lastRemindMoveAroundTime)
+  {
+    printRemindMoveAround();
+    lastRemindMoveAroundTime = currentTime;
+  }
+
+  // Check for scheduled reminders
+  if (currentTime >= morningBreakfastTime && currentTime < lunchBreakReminderTime)
+  {
+    printMorningBreakfast();
+  }
+  else if (currentTime >= lunchBreakReminderTime && currentTime < dishesTime)
+  {
+    printLunchBreakReminder();
+  }
+  else if (currentTime >= dishesTime && currentTime < eveningWindDownTime)
+  {
+    printDishes();
+  }
+  else if (currentTime >= eveningWindDownTime)
+  {
+    printEveningWindDown();
+  }
 }
 
-// FUNCTIONS
+// FUNCTION DEFINITIONS
 // DISPLAY FUNCTIONS
 unsigned long testFillScreen()
 {
@@ -210,9 +283,10 @@ unsigned long testText()
   tft.fillScreen(ILI9341_BLACK);
   unsigned long start = micros();
   tft.setCursor(0, 0);
-  tft.setTextColor(ILI9341_WHITE);
+  tft.setRotation(1),
+      tft.setTextColor(ILI9341_WHITE);
   tft.setTextSize(1);
-  tft.println("Hello World!");
+  tft.println("Hello Tammylee!");
   tft.setTextColor(ILI9341_YELLOW);
   tft.setTextSize(2);
   tft.println(1234.56);
@@ -222,17 +296,13 @@ unsigned long testText()
   tft.println();
   tft.setTextColor(ILI9341_GREEN);
   tft.setTextSize(5);
-  tft.println("Groop");
+  tft.println("How Are you?");
   tft.setTextSize(2);
-  tft.println("I implore thee,");
+  tft.println("Jamie loves you!");
   tft.setTextSize(1);
-  tft.println("my foonting turlingdromes.");
-  tft.println("And hooptiously drangle me");
-  tft.println("with crinkly bindlewurdles,");
-  tft.println("Or I will rend thee");
-  tft.println("in the gobberwarts");
-  tft.println("with my blurglecruncheon,");
-  tft.println("see if I don't!");
+  tft.println("Time to meet your helping hands pal");
+  tft.println("I'm a device Jamie made for you");
+  tft.println("I'm here to help you remember!");
   return micros() - start;
 }
 unsigned long testLines(uint16_t color)
@@ -491,56 +561,67 @@ void updatePixelState(uint32_t color)
 void updateTimeAndDate()
 {
   bool synced = Particle.syncTime();
-  // Ensure Particle is synchronized with cloud time
   if (!synced)
   {
-    Serial.println("Not synced with Particle Cloud. Attempting sync...");
+    Serial.printf("Not synced with Particle Cloud. Attempting sync...\n");
     Particle.syncTime();
     delay(5000); // Wait for sync to complete
   }
-  // Get current time
-  snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d\n", Time.hour(), Time.minute(), Time.second());
-  // Get current date
-  snprintf(buffer + strlen(buffer), sizeof(buffer) - strlen(buffer), " %02d-%02d-%04d", Time.month(), Time.day(), Time.year());
-  Serial.print("Current Time: ");
-  Serial.println(buffer);
-}
-// void checkTimerEvents(){
-// int numTimerEvents = 3;
-// TimerEvent event = timerEvents[i];
-// for (i = 0; i < numTimerEvents; i++)
-// {
-//   if ((currentMinute % event.intervalMinutes == 0))
-//   {
-//     executeTask(event.taskName);
-//   }
-// }
-// void checkTimeOfDayEvents();
-
-// UPDATE FUNCTIONS
-void updateDisplay()
-{
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(0, 0);
   tft.setTextColor(ILI9341_YELLOW);
   tft.setTextSize(3);
+
+  snprintf(timeString, sizeof(timeString), "%02d:%02d", Time.hour(), Time.minute());
+  snprintf(buffer, sizeof(buffer), " %02d-%02d-%04d", Time.month(), Time.day(), Time.year());
+
+  Serial.printf("Current Time: %s\n", timeString);
+  Serial.printf("Current Date: %s\n", buffer);
+  tft.println(timeString);
   tft.println(buffer);
 }
-void togglePowerState()
-{
-  bool currentState = digitalRead(EN_PIN);
-  digitalWrite(EN_PIN, !currentState);
+// UPDATE FUNCTIONS
+// void togglePowerState()
+//       {
+//         bool currentState = digitalRead(EN_PIN);
+//         digitalWrite(EN_PIN, !currentState);
 
-  if (digitalRead(EN_PIN))
+//         if (digitalRead(EN_PIN))
+//         {
+//           tft.println("Device on\n");
+//         }
+//         else
+//         {
+//           tft.println("Device sleepin\n");
+//         }
+// }
+// SCHEDULE
+void setupScheduleDisplay()
+{
+  tft.fillScreen(ILI9341_BLACK);
+
+  int x = 20;
+  int y = 40;
+  int fontSize = 24;
+
+  tft.setCursor(x, y);
+  tft.setTextColor(ILI9341_RED);
+  tft.setTextSize(fontSize);
+  tft.println("Daily Schedule");
+  y += fontSize * 1.5;
+
+  for (int i = 0; i < sizeof(reminders) / sizeof(reminders[0]); i++)
   {
-    tft.println("Device on\n");
-  }
-  else
-  {
-    tft.println("Device sleepin\n");
+    tft.println(reminders[i]);
+    y += fontSize * 1.5;
+
+    if (i < sizeof(reminders) / sizeof(reminders[0]) - 1)
+    {
+      tft.println("---");
+      y += fontSize;
+    }
   }
 }
-
 // REMINDERS FUNCTIONS
 void printRemindToPee()
 {
@@ -553,6 +634,8 @@ void printRemindToPee()
   tft.setTextColor(ILI9341_YELLOW);
   tft.setTextSize(3);
   tft.println("Time to try to use \nthe restroom!");
+  tft.println(timeString);
+  tft.println(buffer);
 }
 void printRemindFeetUp()
 {
@@ -565,6 +648,8 @@ void printRemindFeetUp()
   tft.setTextColor(ILI9341_GREEN);
   tft.setTextSize(3);
   tft.println("Are your feet up?");
+  tft.println(timeString);
+  tft.println(buffer);
 }
 void printRemindMoveAround()
 {
@@ -577,6 +662,8 @@ void printRemindMoveAround()
   tft.setTextColor(ILI9341_ORANGE);
   tft.setTextSize(3);
   tft.println("Lets get up \nand move around!");
+  tft.println(timeString);
+  tft.println(buffer);
 }
 void printMorningBreakfast()
 {
@@ -589,6 +676,8 @@ void printMorningBreakfast()
   tft.setTextColor(ILI9341_CYAN);
   tft.setTextSize(3);
   tft.println("Good morning Mama\nTime to try to use the restroom!");
+  tft.println(timeString);
+  tft.println(buffer);
 }
 void printLunchBreakReminder()
 {
@@ -601,6 +690,8 @@ void printLunchBreakReminder()
   tft.setTextColor(ILI9341_PINK);
   tft.setTextSize(3);
   tft.println("Lunch time!");
+  tft.println(timeString);
+  tft.println(buffer);
 }
 void printDishes()
 {
@@ -613,6 +704,8 @@ void printDishes()
   tft.setTextColor(ILI9341_CYAN);
   tft.setTextSize(3);
   tft.println("Lets help out\na little and\n load the diswasher\n keep cups paired with lids!");
+  tft.println(timeString);
+  tft.println(buffer);
 }
 void printEveningWindDown()
 {
@@ -625,4 +718,6 @@ void printEveningWindDown()
   tft.setTextColor(ILI9341_PURPLE);
   tft.setTextSize(3);
   tft.println("Time to WIND DOWN");
+  tft.println(timeString);
+  tft.println(buffer);
 }
