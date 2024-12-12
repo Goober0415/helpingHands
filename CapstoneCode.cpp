@@ -8,14 +8,25 @@
 #include <DFRobotDFPlayerMini.h>
 #include <wemo.h>
 #include <Adafruit_ILI9341_RK.h>
+#include <hue.h>
+#include <Adafruit_MQTT/Adafruit_MQTT_SPARK.h>
+#include <Adafruit_MQTT/Adafruit_MQTT.h>
+#include <Credentials.h>
 
+TCPClient TheClient;
+
+Adafruit_MQTT_SPARK mqtt(&TheClient, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
+Adafruit_MQTT_Publish reminders(&mqtt, AIO_USERNAME "/feeds/reminders");
+Adafruit_MQTT_Publish colors(&mqtt, AIO_USERNAME "/feeds/colors");
+void MQTT_connect();
+bool MQTT_ping();
 #define TFT_DC D5
 #define TFT_CS D4
 #define STMPE_CS D3
 #define TFT_WIDTH 320
 #define TFT_HEIGHT 240
 
-SYSTEM_MODE(MANUAL);
+SYSTEM_MODE(AUTOMATIC);
 
 // VARIABLES
 // GLOBAL
@@ -31,14 +42,13 @@ unsigned long lastRemindMoveAroundTime = 0;
 unsigned long lastCheckTime = 0;
 unsigned long lastRemindUpdate = 0;
 // CONSTANTS
-const int PIXELCOUNT = 7, NUMBEROFTRACKS = 6, WEMO = 1;
+const int PIXELCOUNT = 7, NUMBEROFTRACKS = 6, WEMO = 1, HUE = 1;
 const unsigned long DEBOUNCE_DELAY = 1000; // 1 second debounce time
 // OBJECTS
 Adafruit_ILI9341 tft(TFT_CS, TFT_DC);
 Adafruit_NeoPixel pixel(PIXELCOUNT, SPI1, WS2812B);
-// Button redButton(EN_PIN);
 Button encoderSwitch(D15);
-// DFRobotDFPlayerMini MomsGrooves;
+DFRobotDFPlayerMini MomsGrooves;
 
 // FUNCTIONS
 // DISPLAY FUNCTIONS
@@ -54,14 +64,11 @@ unsigned long testTriangles();
 unsigned long testFilledCircles(uint8_t radius, uint16_t color);
 unsigned long testCircles(uint8_t radius, uint16_t color);
 unsigned long testFilledRoundRects();
-// NEOPIXEL FUNCTIONS
+// LIGHT FUNCTIONS
 void updatePixelState(uint32_t color);
-// TIME FUNCTIONS
+void updateHueState(uint32_t color);
+//  TIME FUNCTIONS
 void updateTimeAndDate();
-// void checkTimerEvents();
-// void checkTimeOfDayEvents();
-// UPDATE FUNCTIONS
-// void togglePowerState();
 // REMINDERS FUNCTIONS
 void printRemindToPee();
 void printRemindFeetUp();
@@ -70,17 +77,8 @@ void printMorningBreakfast();
 void printLunchBreakReminder();
 void printDishes();
 void printEveningWindDown();
-
-// SCHEDULE
-const char *reminders[] = {
-    "Wake Up",
-    "Breakfast",
-    "Take Medication",
-    "Lunch",
-    "Exercise",
-    "Dinner",
-    "Bedtime"};
-
+// OBJECT FUNCTIONS
+void onOff();
 // Time variables
 unsigned long remindToPeeInterval = 3600000;        // Every hour in milliseconds
 unsigned long remindFeetUpInterval = 27000000;      // Every 45 minutes in milliseconds
@@ -88,7 +86,6 @@ unsigned long remindMoveAroundInterval = 108000000; // Every 3 hours and 15 minu
 Timer timeToPee(remindToPeeInterval, printRemindToPee);
 Timer feetUp(remindFeetUpInterval, printRemindFeetUp);
 Timer moveIt(remindMoveAroundInterval, printRemindMoveAround);
-
 // Scheduled reminders
 unsigned long morningBreakfastTime = 28800000UL;   // 0830 in milliseconds since midnight
 unsigned long lunchBreakReminderTime = 46800000UL; // 1300 in milliseconds since midnight
@@ -103,18 +100,17 @@ Timer windDown(eveningWindDownTime, printEveningWindDown);
 void setup()
 {
   Serial.begin(115200);
-  Wire.begin();
+  Serial1.begin(9600);
   // initiate display
   tft.begin();
   // initialte wifi
   WiFi.on();
-  //  WiFi.clearCredentials();
-  //  WiFi.setCredentials("CJLT2023","Charlie915");
+
   waitFor(WiFi.ready, 1000);
   // initiate time and date
   Particle.syncTime();
   Time.zone(-7);
-  // attachInterrupt(redButton, buttonState, RISING);
+
   // initiate neopixels
   pixel.begin();
   pixel.setBrightness(15);
@@ -195,32 +191,78 @@ void setup()
   delay(500);
 
   updateTimeAndDate();
-
-  // initiate MP3 player
-  // MomsGrooves.begin(Serial1);
-  // MP3OnOff = MomsGrooves.begin(Serial1);
-  // while (!MP3OnOff)
-  // {
-  //   Serial.printf("Unable to begin:\n");
-  //   Serial.printf("1. Please recheck the connection\n");
-  //   Serial.printf("2. Please insert the SD card!\n");
-  // }
-  // Serial.printf("DFPlayer Mini Online\n");
-  // MomsGrooves.volume(25);
+  delay(10000);
+  printRemindToPee();
+  delay(10000);
+  updatePixelState(indigo);
+  updateTimeAndDate();
+  delay(10000);
+  printRemindFeetUp();
+  delay(10000);
+  updatePixelState(indigo);
+  updateTimeAndDate();
+  delay(10000);
+  printRemindMoveAround();
+  delay(10000);
+  updatePixelState(indigo);
+  updateTimeAndDate();
+  delay(10000);
+  printMorningBreakfast();
+  delay(10000);
+  updatePixelState(indigo);
+  updateTimeAndDate();
+  delay(10000);
+  printLunchBreakReminder();
+  delay(10000);
+  updatePixelState(indigo);
+  updateTimeAndDate();
+  delay(10000);
+  printDishes();
+  delay(10000);
+  updatePixelState(indigo);
+  updateTimeAndDate();
+  delay(10000);
+  printEveningWindDown();
+  delay(10000);
+  updatePixelState(indigo);
+  updateTimeAndDate();
+  delay(10000);
+  //  initiate MP3 player
+  MomsGrooves.begin(Serial1);
+  MP3OnOff = MomsGrooves.begin(Serial1);
+  if (!MP3OnOff)
+  {
+    Serial.printf("Unable to begin:\n");
+    Serial.printf("1. Please recheck the connection\n");
+    Serial.printf("2. Please insert the SD card!\n");
+    while (true)
+      ;
+  }
+  Serial.printf("DFPlayer Mini Online\n");
+  MomsGrooves.volume(25);
 }
 
 void loop()
 {
+  MQTT_connect();
+  MQTT_ping();
   // Update pixel state every second
   updatePixelState(tomato);
-  currentTime = millis();
+
   timeToPee.start();
+  delay(3000);
   feetUp.start();
+  delay(3000);
   moveIt.start();
+  delay(3000);
   breakfast.start();
+  delay(3000);
   lunch.start();
+  delay(3000);
   dishes.start();
+  delay(3000);
   windDown.start();
+  delay(3000);
 
   // Update time every 30 seconds
   if (millis() - lastUpdateTime >= 30000)
@@ -228,25 +270,60 @@ void loop()
     updateTimeAndDate();
     lastUpdateTime = millis();
   }
-
   if (encoderSwitch.isClicked())
   {
     buttonState = !buttonState;
+    Serial.print("on/off");
   }
-  if (buttonState == TRUE)
-  {
-    wemoWrite(WEMO, LOW);
-  }
-  else
-  {
-    wemoWrite(WEMO, HIGH);
-  }
+  onOff();
   timeToPee.reset();
+  delay(3000);
   feetUp.reset();
+  delay(3000);
   moveIt.reset();
 }
 
 // FUNCTION DEFINITIONS
+void MQTT_connect()
+{
+  int8_t ret;
+
+  // Return if already connected.
+  if (mqtt.connected())
+  {
+    return;
+  }
+
+  Serial.print("Connecting to MQTT... ");
+
+  while ((ret = mqtt.connect()) != 0)
+  { // connect will return 0 for connected
+    Serial.printf("Error Code %s\n", mqtt.connectErrorString(ret));
+    Serial.printf("Retrying MQTT connection in 5 seconds...\n");
+    mqtt.disconnect();
+    delay(5000); // wait 5 seconds and try again
+  }
+  Serial.printf("MQTT Connected!\n");
+}
+bool MQTT_ping()
+{
+  static unsigned int last;
+  bool pingStatus;
+
+  if ((millis() - last) > 120000)
+  {
+    Serial.printf("Pinging MQTT \n");
+    pingStatus = mqtt.ping();
+    if (!pingStatus)
+    {
+      Serial.printf("Disconnecting \n");
+      mqtt.disconnect();
+    }
+    last = millis();
+  }
+  return pingStatus;
+}
+
 // DISPLAY FUNCTIONS
 unsigned long testFillScreen()
 {
@@ -526,7 +603,7 @@ unsigned long testFilledRoundRects()
   return micros() - start;
 }
 
-// NEOPIXEL FUNCTIONS
+// LIGHT FUNCTIONS
 void updatePixelState(uint32_t color)
 {
   if (currentTime - lastUpdateTime <= 3000)
@@ -541,6 +618,9 @@ void updatePixelState(uint32_t color)
     pixel.show();
   }
 }
+// void updateHueState(uint32_t color){
+//    setHue(HUE, true, color);
+//  }
 
 // TIME FUNCTIONS
 void updateTimeAndDate()
@@ -565,27 +645,12 @@ void updateTimeAndDate()
   tft.println(timeString);
   tft.println(buffer);
 }
-// UPDATE FUNCTIONS
-// void togglePowerState()
-//       {
-//         bool currentState = digitalRead(EN_PIN);
-//         digitalWrite(EN_PIN, !currentState);
-
-//         if (digitalRead(EN_PIN))
-//         {
-//           tft.println("Device on\n");
-//         }
-//         else
-//         {
-//           tft.println("Device sleepin\n");
-//         }
-// }
 
 // REMINDERS FUNCTIONS
 void printRemindToPee()
 {
   updatePixelState(yellow);
-
+  updateHueState(yellow);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(45, 20);
   tft.setTextColor(ILI9341_YELLOW);
@@ -595,11 +660,15 @@ void printRemindToPee()
   tft.println("Time to try to use \nthe restroom!");
   tft.println(timeString);
   tft.println(buffer);
+
+  reminders.publish("Reminder to Pee");
+  colors.publish(yellow);
+  Serial.printf("Publishing %s \n", "Reminder to Pee");
 }
 void printRemindFeetUp()
 {
   updatePixelState(green);
-
+  updateHueState(green);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(45, 20);
   tft.setTextColor(ILI9341_GREEN);
@@ -609,11 +678,14 @@ void printRemindFeetUp()
   tft.println("Are your feet up?");
   tft.println(timeString);
   tft.println(buffer);
+  reminders.publish("Are your feet up?");
+  colors.publish(green);
+  Serial.printf("Publishing %s \n", "Are your feet up?");
 }
 void printRemindMoveAround()
 {
   updatePixelState(orange);
-
+  updateHueState(orange);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(45, 20);
   tft.setTextColor(ILI9341_ORANGE);
@@ -623,25 +695,31 @@ void printRemindMoveAround()
   tft.println("Lets get up \nand move around!");
   tft.println(timeString);
   tft.println(buffer);
+  reminders.publish("Time to move around");
+  colors.publish(orange);
+  Serial.printf("Publishing %s \n", "Time to move around");
 }
 void printMorningBreakfast()
 {
   updatePixelState(cyan);
-
+  updateHueState(cyan);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(45, 20);
   tft.setTextColor(ILI9341_CYAN);
   tft.setCursor(0, 0);
   tft.setTextColor(ILI9341_CYAN);
   tft.setTextSize(3);
-  tft.println("Good morning Mama\nTime to try to use the restroom!");
+  tft.println("Good morning Mama\nTime eat some oatemeal!!");
   tft.println(timeString);
   tft.println(buffer);
+  reminders.publish("breakfast time");
+  colors.publish(cyan);
+  Serial.printf("Publishing %s \n", "breakfast time");
 }
 void printLunchBreakReminder()
 {
   updatePixelState(red);
-
+  updateHueState(red);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(45, 20);
   tft.setTextColor(ILI9341_PINK);
@@ -651,11 +729,14 @@ void printLunchBreakReminder()
   tft.println("Lunch time!");
   tft.println(timeString);
   tft.println(buffer);
+  reminders.publish("Lunch!");
+  colors.publish(red);
+  Serial.printf("Publishing %s \n", "Lunch!");
 }
 void printDishes()
 {
   updatePixelState(cyan);
-
+  updateHueState(cyan);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(45, 20);
   tft.setTextColor(ILI9341_CYAN);
@@ -665,11 +746,14 @@ void printDishes()
   tft.println("Lets help out\na little and\n load the diswasher\n keep cups paired with lids!");
   tft.println(timeString);
   tft.println(buffer);
+  reminders.publish("Dishes");
+  colors.publish(cyan);
+  Serial.printf("Publishing %s \n", "Dishes");
 }
 void printEveningWindDown()
 {
   updatePixelState(violet);
-
+  updateHueState(violet);
   tft.fillScreen(ILI9341_BLACK);
   tft.setCursor(45, 20);
   tft.setTextColor(ILI9341_PURPLE);
@@ -679,4 +763,22 @@ void printEveningWindDown()
   tft.println("Time to WIND DOWN");
   tft.println(timeString);
   tft.println(buffer);
+  reminders.publish("Wind down");
+  colors.publish(violet);
+  Serial.printf("Publishing %s \n", "Wind down");
+}
+
+// OBJECT FUNCTIONS
+void onOff()
+{
+  if (buttonState == TRUE)
+  {
+    wemoWrite(WEMO, LOW);
+    Serial.print("wemo off");
+  }
+  else
+  {
+    wemoWrite(WEMO, HIGH);
+    Serial.print("wemo on");
+  }
 }
